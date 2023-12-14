@@ -28,6 +28,8 @@ $(function () {
   //   { propReduce }
   // );
 
+  // Source/Credit to this repo
+  // https://github.com/Turfjs/turf/tree/abelvm/kernelDensity/packages/turf-kernel_density
   function kernelDensity(points, weight) {
     let output = clone(points),
       featureCount = featureReduce(output, (prev) => prev + 1, 0),
@@ -87,6 +89,7 @@ $(function () {
     }
 
     // calc the median distance from the centroid to each point (km)
+    // the original repo will fail here...
     let distArray = [];
     featureEach(output, (current) => {
       distArray.push(distance(current, mc));
@@ -108,216 +111,20 @@ $(function () {
     return output;
   }
 
-  //console.log('Init!');
   let map = L.map('map').setView([24.25, 120.5], 12);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(map);
 
-  // 產生隨機點
+  // Create random points
   let randomPoints = turf.randomPoint(100, {
     bbox: [120.456799, 24.326787, 120.569977, 24.208155],
   });
   turf.featureEach(randomPoints, function (point) {
     point.properties.obs = 1;
   });
-  // let minPoint = turf.point([120.456799, 24.326787], { obs: 0 });
-  // let maxPoint = turf.point([120.569977, 24.208155], { obs: 0 });
-  // randomPoints.features.push(minPoint);
-  // randomPoints.features.push(maxPoint);
   console.log('randomPoints:', randomPoints);
-  // debugger;
-
-  // 組成 cluster
-  let clusteredPoints = turf.clustersDbscan(randomPoints, 2, { minPoints: 2 });
-  console.log('clusteredPoints', clusteredPoints);
-
-  // 排除掉沒有 cluster 編號的 (為 'noise' 的)
-  let clusterArr = clusteredPoints.features.filter((item) => {
-    if (String(item.properties.cluster) !== 'undefined') {
-      return item;
-    }
-  });
-  // console.log(clusterArr);
-  let clusterArrFlat = clusterArr.map((item) => {
-    return item.properties.cluster;
-  });
-  // console.log(clusterArrFlat);
-  let uniqueClusterNum = clusterArrFlat.filter((item, index, arr) => {
-    return arr.indexOf(item) === index;
-  });
-  // console.log(uniqueClusterNum);
-
-  let clusterWeightArray = uniqueClusterNum.map((item) => {
-    let pointSum = 0;
-    clusteredPoints.features.forEach((el) => {
-      if (el.properties.cluster === item) {
-        pointSum++;
-      }
-    });
-    // clusterNum: 不重複的群聚編號, pointSum: 該群聚下有幾個點
-    return { clusterNum: item, pointSum };
-  });
-  console.log(clusterWeightArray);
-
-  let clusteredLayer = L.geoJson(null, {
-    pointToLayer(point, latlng) {
-      const clusterId = point.properties.cluster;
-      let iconOption = {
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      };
-      switch (clusterId) {
-        case 0: {
-          iconOption.iconUrl = './img/dot0.png';
-          break;
-        }
-        case 1: {
-          iconOption.iconUrl = './img/dot1.png';
-          break;
-        }
-        case 2: {
-          iconOption.iconUrl = './img/dot2.png';
-          break;
-        }
-        case 3: {
-          iconOption.iconUrl = './img/dot3.png';
-          break;
-        }
-        case 4: {
-          iconOption.iconUrl = './img/dot4.png';
-          break;
-        }
-        case 5: {
-          iconOption.iconUrl = './img/dot5.png';
-          break;
-        }
-        default: {
-          iconOption.iconUrl = './img/dotDefault.png';
-          break;
-        }
-      }
-      return L.marker(latlng, {
-        icon: L.icon(iconOption),
-      }).bindPopup(`cluster: ${point.properties.cluster}, dbscan: ${[point.properties.dbscan]}`);
-    },
-  });
-  // clusteredLayer.addData(clusteredPoints).addTo(map);
-
-  let clusteredPointsFeaturesAddInfo = clusteredPoints.features.map((item) => {
-    let clusterWeight;
-    let itemReturn = item;
-    if (item.properties.dbscan === 'noise') {
-      clusterWeight = 1;
-    } else {
-      // 群聚包含幾點即為內插權重
-      clusterWeightArray.forEach((el) => {
-        if (el.clusterNum == item.properties.cluster) {
-          clusterWeight = el.pointSum;
-        }
-      });
-    }
-    itemReturn.properties.clusterWeight = clusterWeight;
-    return itemReturn;
-  });
-  clusteredPoints.features = clusteredPointsFeaturesAddInfo;
-
-  // === 宣告圖層 ===
-  // let randomLayer = L.geoJson(null, {
-  //   pointToLayer(point, latlng) {
-  //     console.log('each random point:', point);
-  //     return L.marker(latlng, {
-  //       icon: L.icon({
-  //         iconUrl: './img/dot.png',
-  //         iconSize: [16, 16],
-  //         iconAnchor: [8, 8],
-  //       }),
-  //     }).bindPopup(`${point.properties.obs.toFixed(3).toString()}`);
-  //   },
-  // });
-  // randomLayer.addData(randomPoints).addTo(map);
-  // map.fitBounds(randomLayer.getBounds());
-
-  // === 使用 interpolate (即為IDW) ===
-  // === 成果會是 GeoJson ===
-  // let idwGrid = turf.interpolate(randomPoints, 0.5, {
-  //   gridType: 'square',
-  //   property: 'obs',
-  //   units: 'kilometers',
-  //   weight: 1,
-  // });
-  // console.log('idwGrid:', idwGrid);
-
-  // let idwGrid = turf.interpolate(clusteredPoints, 0.1, {
-  //   gridType: 'point',
-  //   property: 'clusterWeight',
-  //   units: 'kilometers',
-  //   weight: 1,
-  // });
-  // console.log('idwGrid:', idwGrid);
-
-  // === 加入圖層和給色階 ===
-  // let idwGridLayer = L.geoJson(idwGrid, {
-  //   onEachFeature(feature, layer) {
-  //     layer.bindPopup(feature.properties.clusterWeight.toFixed(3).toString());
-  //   },
-  //   style(feature) {
-  //     return {
-  //       fillColor: getColor(feature.properties.clusterWeight),
-  //       fillOpacity: 0.8,
-  //       stroke: false,
-  //     };
-  //   },
-  // }).addTo(map);
-  // console.log('idwGridLayer:', idwGridLayer.getBounds());
-  // map.fitBounds(idwGridLayer.getBounds());
-
-  // function getColor(x) {
-  //   let maxWeight = 0;
-  //   clusterWeightArray.forEach((item, index) => {
-  //     maxWeight = maxWeight < item.pointSum ? item.pointSum : maxWeight;
-  //   });
-  //   if (x < maxWeight * 0.25) return '#78C7FF';
-  //   if (x < maxWeight * 0.5) return '#4E9EEB';
-  //   if (x < maxWeight * 0.75) return '#266AC7';
-  //   if (x < maxWeight) return '#004080';
-  //   return 'beige';
-  // }
-
-  // function isobandGetColor() {
-  //   let maxWeight = 0;
-  //   clusterWeightArray.forEach((item, index) => {
-  //     maxWeight = maxWeight < item.pointSum ? item.pointSum : maxWeight;
-  //   });
-  //   return [0, maxWeight * 0.25, maxWeight * 0.5, maxWeight * 0.75, maxWeight];
-  // }
-
-  // let isobands = turf.isobands(idwGrid, isobandGetColor(), {
-  //   zProperty: 'clusterWeight',
-  //   commonProperties: {
-  //     'fill-opacity': 0.7,
-  //   },
-  //   breaksProperties: [{ fill: '#FFF275' }, { fill: '#FF8C42' }, { fill: '#FF5722' }, { fill: '#E41D00' }],
-  // });
-  // console.log('isobands:', isobands);
-
-  // let isobandsLayer = L.geoJson(isobands, {
-  //   onEachFeature(feature, layer) {
-  //     layer.bindPopup(feature.properties.clusterWeight);
-  //   },
-  //   style(feature) {
-  //     return {
-  //       fillColor: feature.properties.fill,
-  //       fillOpacity: feature.properties['fill-opacity'],
-  //       // stroke: false,
-  //       color: 'beige',
-  //       weight: 1,
-  //     };
-  //   },
-  // }).addTo(map);
-  // console.log('isobandsLayer:', isobandsLayer.getBounds());
-  // map.fitBounds(isobandsLayer.getBounds());
 
   // zValue can be passed as the second param to the kernelDensity method
   const KDEResult = kernelDensity(randomPoints);
