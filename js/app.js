@@ -86,18 +86,11 @@ $(function () {
       });
     }
 
-    // centroid
-    // console.log({ mc });
-    // 不斷去指定 output，是 clone 一開始 input 的 points
-    console.log({ output });
-
     // calc the median distance from the centroid to each point (km)
     let distArray = [];
     featureEach(output, (current) => {
       distArray.push(distance(current, mc));
     });
-
-    // console.log(distArray);
 
     median = _getMedian(distArray);
     // calc the standard distance (pseudo-km)
@@ -123,9 +116,11 @@ $(function () {
   }).addTo(map);
 
   // 產生隨機點
-  let randomPoints = turf.randomPoint(20, { bbox: [120.456799, 24.326787, 120.569977, 24.208155] });
+  let randomPoints = turf.randomPoint(100, {
+    bbox: [120.456799, 24.326787, 120.569977, 24.208155],
+  });
   turf.featureEach(randomPoints, function (point) {
-    // point.properties.obs = Math.random() * 5;
+    point.properties.obs = 1;
   });
   // let minPoint = turf.point([120.456799, 24.326787], { obs: 0 });
   // let maxPoint = turf.point([120.569977, 24.208155], { obs: 0 });
@@ -208,7 +203,7 @@ $(function () {
       }).bindPopup(`cluster: ${point.properties.cluster}, dbscan: ${[point.properties.dbscan]}`);
     },
   });
-  clusteredLayer.addData(clusteredPoints).addTo(map);
+  // clusteredLayer.addData(clusteredPoints).addTo(map);
 
   let clusteredPointsFeaturesAddInfo = clusteredPoints.features.map((item) => {
     let clusterWeight;
@@ -324,8 +319,154 @@ $(function () {
   // console.log('isobandsLayer:', isobandsLayer.getBounds());
   // map.fitBounds(isobandsLayer.getBounds());
 
-  console.log({ randomPoints }, 'getType(randomPoints):', turf.getType(randomPoints));
-
+  // zValue can be passed as the second param to the kernelDensity method
   const KDEResult = kernelDensity(randomPoints);
-  console.log('KDEResult:', KDEResult);
+  // console.log('KDEResult:', KDEResult);
+
+  const KDENumberArray = KDEResult.features.map((item) => {
+    return item.properties.kernelDensity;
+  });
+  const KDEMax = Math.max(...KDENumberArray);
+  const KDEMin = Math.min(...KDENumberArray);
+  const KDERange = KDEMax - KDEMin;
+  console.log(KDENumberArray, KDEMax, KDEMin);
+
+  let KDELayer = L.geoJson(null, {
+    pointToLayer(point, latlng) {
+      const KDEInterval = KDERange / 5;
+      const KDEIndex = Math.floor((point.properties.kernelDensity - KDEMin) / KDEInterval);
+
+      let iconOption = {
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      };
+      switch (KDEIndex) {
+        case 0: {
+          iconOption.iconUrl = './img/dot0.png';
+          break;
+        }
+        case 1: {
+          iconOption.iconUrl = './img/dot1.png';
+          break;
+        }
+        case 2: {
+          iconOption.iconUrl = './img/dot2.png';
+          break;
+        }
+        case 3: {
+          iconOption.iconUrl = './img/dot3.png';
+          break;
+        }
+        case 4: {
+          iconOption.iconUrl = './img/dot4.png';
+          break;
+        }
+        case 5: {
+          iconOption.iconUrl = './img/dot5.png';
+          break;
+        }
+        default: {
+          iconOption.iconUrl = './img/dotDefault.png';
+          break;
+        }
+      }
+      return L.marker(latlng, {
+        icon: L.icon(iconOption),
+      }).bindPopup(`prop: ${JSON.stringify(point.properties)}, KDE: ${[point.properties.kernelDensity]}`);
+    },
+  });
+  KDELayer.addData(KDEResult).addTo(map);
+
+  // Assign basic/default kernelDensity value (0) to pointGrids
+  // pointGrid is created 0.8 * 0.8 KM
+  let pointGrid = turf.pointGrid([120.456799, 24.208155, 120.569977, 24.326787], 0.8, {
+    properties: { kernelDensity: 0 },
+  });
+  // console.log({ pointGrid });
+
+  // Create an array to record the nearest point in pointGrids for KDEResult points
+  // Will map the KDEResults to the nearest pointGrids for a raster display
+  let findNearestArr = [];
+  turf.featureEach(KDEResult, (pt) => {
+    let nearestGridPtOfTargetPt = { nearestPt: turf.nearestPoint(pt, pointGrid), selfPt: pt };
+    findNearestArr.push(nearestGridPtOfTargetPt);
+  });
+  console.log(findNearestArr);
+
+  // Accumulate kernel density to pointGrid and create pointGridLayer
+  // Must be cloned first and use the new pointGrid for mapping (Still not sure why though...)
+  let outputPointGrid = clone(pointGrid);
+
+  for (const el of findNearestArr) {
+    const KDENo = el.selfPt.properties.kernelDensity;
+    const featureIndex = el.nearestPt.properties.featureIndex;
+    // console.log(KDENo, featureIndex);
+    outputPointGrid.features[featureIndex].properties.kernelDensity += KDENo;
+  }
+
+  console.log('outputPointGrid', outputPointGrid);
+  console.log('pointGrid', pointGrid);
+
+  const KDEGridNumberArray = outputPointGrid.features.map((item) => {
+    return item.properties.kernelDensity;
+  });
+
+  // Being accumulated to grids, so this will not the same as the KDENumberArray numbers.
+  const KDEGridMax = Math.max(...KDEGridNumberArray);
+  const KDEGridMin = Math.min(...KDEGridNumberArray);
+  const KDEGridRange = KDEGridMax - KDEGridMin;
+  console.log(KDEGridNumberArray, KDEGridMax, KDEGridMin);
+
+  function isobandGetInterval() {
+    return [
+      KDEGridMin,
+      KDEGridMin + KDEGridRange * 0.1,
+      KDEGridMin + KDEGridRange * 0.2,
+      KDEGridMin + KDEGridRange * 0.3,
+      KDEGridMin + KDEGridRange * 0.4,
+      KDEGridMin + KDEGridRange * 0.5,
+      KDEGridMin + KDEGridRange * 0.6,
+      KDEGridMin + KDEGridRange * 0.7,
+      KDEGridMin + KDEGridRange * 0.8,
+      KDEGridMin + KDEGridRange * 0.9,
+      KDEGridMax,
+    ];
+  }
+
+  let isobands = turf.isobands(outputPointGrid, isobandGetInterval(), {
+    zProperty: 'kernelDensity',
+    commonProperties: {
+      'fill-opacity': 0.7,
+    },
+    breaksProperties: [
+      { fill: '#FFFF66' },
+      { fill: '#FFED47' },
+      { fill: '#FFDB29' },
+      { fill: '#FFC400' },
+      { fill: '#FFA500' },
+      { fill: '#FF8C42' },
+      { fill: '#FF7043' },
+      { fill: '#FF5733' },
+      { fill: '#FF4500' },
+      { fill: '#FF3300' },
+    ],
+  });
+  // console.log({ isobands });
+
+  let isobandsLayer = L.geoJson(isobands, {
+    onEachFeature(feature, layer) {
+      layer.bindPopup(feature.properties.kernelDensity);
+    },
+    style(feature) {
+      return {
+        fillColor: feature.properties.fill,
+        fillOpacity: feature.properties['fill-opacity'],
+        // stroke: false,
+        color: 'beige',
+        weight: 1,
+      };
+    },
+  }).addTo(map);
+  map.fitBounds(isobandsLayer.getBounds());
+  // console.log('isobandsLayer:', isobandsLayer.getBounds());
 });
